@@ -1,0 +1,446 @@
+---
+title: "Customer Churn Modeling in R"
+author: "Rodrigo Gasha"
+date: "August 28th, 2021"
+output:
+  html_document:
+      toc: true
+      toc_float:
+        collapsed: true
+        smooth_scroll: true
+---
+# Introduction
+
+Customer Churn refers to the rate of customer attrition in a company or in simpler words speed at which customer leaves your company or service.
+
+A predictive Churn Model is a straightforward classification tool: look at the user activity from the past and check to see who is active after a certain time and then create a model that probabilistically identifies the steps and stages when a customer (or segment) is leaving your service or product.
+
+Having a predictive churn model gives you awareness and quantifiable metrics to fight against in your retention efforts. This gives you the ability to pattern habits of customers who leave, and step in before they make that decision. Without this tool, you would be acting on broad assumptions, not a data-driven model that reflects how your customers really act.
+
+The dataset can be found at the following link: https://www.kaggle.com/shubh0799/churn-modelling. It contains details of costumers in a company. The objective of this document is to evaluate the performance of four classification models:
+
+1. Logistic Regression
+2. k-Nearest Neighbors
+3. Random Forest
+4. Support Vector Machine
+
+## Set Up and Data Wrangling
+```{r}
+# Install packages
+pacman::p_load(pacman, ggplot2, tidyverse, randomForest, GGally, caret,
+               e1071, dplyr, tidyr, caret, reshape2, RColorBrewer, ggthemes,
+               kernlab, magrittr, knitr, mlr, ROSE, MLmetrics)
+```
+
+
+```{r}
+# Dataset import
+data <- read.csv("Churn_Modelling.csv")
+str(data)
+
+# Remove unnecessary columns
+data <- data[,-(1:3)]
+
+```
+## Exploratory Data Analysis
+```{r}
+# Pie chart de exited
+summary(data)
+perc <- as.vector(table(data$Exited))
+piepercent <- round(100*perc/sum(perc), 1)
+pie(perc, labels = piepercent, main = "Exited Pie Chart",col = rainbow(length(perc)))
+legend("topright", c("Not Exited", "Exited"), cex = 0.8,
+       fill = rainbow(length(perc)))
+```
+```{r}
+# Histograms
+data %>% 
+  ggplot(aes(x = Geography, fill = factor(Exited))) + 
+  geom_bar(position = "dodge") +
+  scale_fill_brewer(palette = "Set1") + 
+  labs(x = "Geography") +
+  guides(fill=guide_legend(title="Exited"))
+
+data %>% 
+  ggplot(aes(x = Gender, fill = factor(Exited))) + 
+  geom_bar(position = "dodge") +
+  scale_fill_brewer(palette = "Set1") + 
+  labs(x = "Gender") +
+  guides(fill=guide_legend(title="Exited"))
+
+data %>% 
+  ggplot(aes(x = Tenure, fill = factor(Exited))) + 
+  geom_bar(position = "dodge") +
+  scale_fill_brewer(palette = "Set1") + 
+  labs(x = "Tenure") +
+  guides(fill=guide_legend(title="Exited"))
+
+data %>% 
+  ggplot(aes(x = NumOfProducts, fill = factor(Exited))) + 
+  geom_bar(position = "dodge") +
+  scale_fill_brewer(palette = "Set1") + 
+  labs(x = "NumOfProducts") +
+  guides(fill=guide_legend(title="Exited"))
+
+data %>% 
+  ggplot(aes(x = HasCrCard, fill = factor(Exited))) + 
+  geom_bar(position = "dodge") +
+  scale_fill_brewer(palette = "Set1") + 
+  labs(x = "HasCrCard") +
+  guides(fill=guide_legend(title="Exited"))
+
+data %>% 
+  ggplot(aes(x = IsActiveMember, fill = factor(Exited))) + 
+  geom_bar(position = "dodge") +
+  scale_fill_brewer(palette = "Set1") + 
+  labs(x = "IsActiveMember") +
+  guides(fill=guide_legend(title="Exited"))
+
+```
+
+From the charts above we can conclude:
+
+* The majority of clients are French but most of the churned costumers come from Germany, in proportion to the total per country of origin
+* The proportion of female customers churning is greater than that of male customers
+* Most of the costumers have a tenure between 1 and 9 whether they churned or not
+* The majority of costumers have up to 2 products. However, most of the churned clients have only 1 product
+* Most of churned clients possess a credit card but also most of the customers have one
+* As expected, the majority of churned clients are inactive members
+
+
+
+```{r}
+# Box Plots
+data %>% 
+  ggplot(aes(x = factor(Exited), y = CreditScore, fill= factor(Exited))) +
+  geom_boxplot() + 
+  labs(x = "Exited") +
+  scale_fill_brewer(palette="Set1") +
+  guides(fill=guide_legend(title="Exited"))
+
+data %>% 
+  ggplot(aes(x = factor(Exited), y = Age, fill=factor(Exited))) +
+  geom_boxplot() + 
+  labs(x = "Exited") + 
+  scale_y_continuous(breaks=seq(0,100,10)) +
+  scale_fill_brewer(palette="Set1") +
+  guides(fill=guide_legend(title="Exited"))
+
+data %>% 
+  ggplot(aes(x = factor(Exited), y = Balance, fill=factor(Exited))) +
+  geom_boxplot() + 
+  labs(x = "Exited")+
+  scale_fill_brewer(palette="Set1") +
+  guides(fill=guide_legend(title="Exited"))
+
+data %>% 
+  ggplot(aes(x = factor(Exited), y = EstimatedSalary, fill=factor(Exited))) +
+  geom_boxplot() + 
+  labs(x = "Exited")+
+  scale_fill_brewer(palette="Set1") +
+  guides(fill=guide_legend(title="Exited"))
+```
+
+From the above plots we conclude that:
+
+* There is no significant difference in credit score distribution between churned a not churned clients
+* Older customers are churning more than younger ones
+* Clients with significant balance are prone to churn more
+* Estimated Salary does not have a significant impact on the likelihood to churn
+
+
+
+```{r}
+# Correlation Heatmap
+cormat <- round(cor(data[,(-2:-3)]),2)
+melted_cormat <- melt(cormat)
+ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
+  geom_tile(color = "white")+
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  theme_minimal()+ 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   size = 10, hjust = 1))+
+  coord_fixed()+
+  geom_text(aes(Var2, Var1, label = value), color = "black", size = 2)
+```
+
+There is no multicollinearity present in data.
+
+
+
+## Data Preprocessing and Splitting Data
+```{r}
+# Categorical Columns as Factor
+data$Exited[data$Exited == 0] <- 'No'
+data$Exited[data$Exited == 1] <- 'Yes'
+categcol <- c("Geography", "Gender", "HasCrCard","IsActiveMember", "Exited")
+data[categcol] <- lapply(data[categcol], factor)
+
+# Feature Scaling
+data <- rapply(data,scale,c("numeric","integer"),how="replace")
+```
+
+```{r}
+# Data Partition - Train and Test
+set.seed(1)
+ind <- sample(2, nrow(data), replace = TRUE, prob = c(0.8, 0.2))
+train <- data[ind==1,]
+test <- data[ind==2,]
+```
+
+```{r}
+# Oversampling Imbalanced Data
+set.seed(1)
+table(train$Exited)
+n <- length(which(train$Exited == "No"))
+train <- ovun.sample(Exited ~ ., data=train, method="over", N=n*2)$data
+
+# Train proportion after oversampling
+table(train$Exited)
+```
+
+
+# Classification Model
+## Logistic Regression
+```{r}
+lr <- glm(Exited ~ ., data=train, family='binomial')
+summary(lr)
+
+lr %>% 
+  summary() %>% 
+  coef() %>% 
+  as_tibble() %>% 
+  cbind(Variable = lr %>% 
+          summary() %>% 
+          coef() %>% rownames(),.) %>% 
+  mutate(`Pr(>|z|)` = round(`Pr(>|z|)`, 6)) %>% 
+  ggplot(aes(x = reorder(Variable, `Pr(>|z|)`), y = `Pr(>|z|)`)) + 
+  geom_bar(stat = "identity", fill = brewer.pal(n = 5, "Set1")[2]) + 
+  labs(x = "",
+       y = "P Value") +
+  theme_few() +
+  theme(axis.text.x = element_text(angle = 45,
+                                   size = 10,
+                                   vjust = 1,
+                                   hjust = 1))
+```
+
+```{r}
+# Significance testing of categorical features
+lr1 <- glm(Exited ~ . - Geography, data=train, family='binomial')
+anova(lr, lr1, test="LRT")
+
+lr2 <- glm(Exited ~ . - Gender, data=train, family='binomial')
+anova(lr, lr2, test="LRT")
+
+lr3 <- glm(Exited ~ . - HasCrCard, data=train, family='binomial')
+anova(lr, lr3, test="LRT")
+
+lr4 <- glm(Exited ~ . - IsActiveMember, data=train, family='binomial')
+anova(lr, lr4, test="LRT")
+
+```
+```{r}
+# Model fit
+lr5 <- glm(Exited ~ . -HasCrCard - EstimatedSalary - Tenure, data=train, family='binomial')
+summary(lr5)
+```
+
+```{r}
+# Prediction
+p1 <- predict(lr5, newdata = test, type = "response")
+
+# Grid search of "p" threshold
+grid <- expand.grid(p= seq(0.05,0.95,by=0.05))
+
+# Add columns to store results
+grid %<>% mutate(F1_Score = rep(0,nrow(grid)))
+
+# Fit model
+for (i in 1:nrow(grid)) {
+  
+  p = grid[i,1]
+  f1 <- F1_Score(y_pred = as.factor(ifelse(p1>p, "Yes", "No")), y_true = test$Exited,     
+                 positive= "Yes")
+  grid[i,2] = f1
+  
+  rm(f1, p)
+}
+
+# Grid
+grid
+```
+With p=0.55 the model reaches the highest F1 Score.
+
+```{r}
+# Final Model
+p=0.55
+cm1 <- confusionMatrix(data = as.factor(ifelse(p1>p, "Yes", "No")), reference = test$Exited, positive="Yes")
+cm1
+
+F1_1 <- F1_Score(y_pred = as.factor(ifelse(p1>p, "Yes", "No")), y_true = test$Exited, positive= "Yes")
+F1_1
+```
+
+## KNN
+```{r cache=TRUE}
+set.seed(1)
+
+# Tune k parameter
+f1 <- function (data, lev = NULL, model = NULL) {
+  precision <- posPredValue(data$pred, data$obs, positive = "Yes")
+  recall  <- sensitivity(data$pred, data$obs, postive = "Yes")
+  f1_val <- (2 * precision * recall) / (precision + recall)
+  names(f1_val) <- c("F1")
+  f1_val
+} 
+
+KNN <- caret::train(Exited ~ ., data = train,
+             method= 'knn',
+             tuneLength = 20,
+             metric = "F1",
+             trControl = trainControl(method = "repeatedcv",
+                                      number=10,
+                                      repeats=3, 
+                                      summaryFunction = f1, 
+                                      search = "grid"))
+# Model Performance
+KNN
+plot(KNN)
+```
+
+K = 37 has the highest F1 Score.
+
+```{r}
+# Variables importance
+varImp(KNN)
+plot(varImp(KNN))
+```
+
+```{r}
+# Final Model
+set.seed(1)
+p2 <- predict(KNN, newdata = test)
+cm2 <- confusionMatrix(p2, test$Exited, positive = "Yes")
+cm2
+
+F1_2 <- F1_Score(y_pred = p2, y_true = test$Exited, positive = "Yes")
+F1_2
+```
+
+## Random Forest
+```{r cache=TRUE}
+# Tune mtry Parameter
+set.seed(1)
+tune.grid <- expand.grid(.mtry = seq(from = 1, to = 10, by = 1))
+rf<- caret::train(Exited ~ ., 
+                 data = train,
+                 method = "rf",
+                 tuneGrid = tune.grid,
+                 metric = "F1",
+                 trControl = trainControl(method = "cv",
+                          number = 10,
+                          classProbs = TRUE,
+                          summaryFunction = f1,
+                          search = "grid"))
+
+rf
+```
+
+mtry = 4 has the highest F1 Score. 
+
+```{r}
+# Final Model
+set.seed(1)
+p3 <- predict(rf, test)
+cm3 <- confusionMatrix(p3, test$Exited, positive = "Yes")
+cm3
+
+F1_3 <- F1_Score(y_pred = p3, y_true = test$Exited, positive = "Yes")
+F1_3
+
+# mtry tune plot
+plot(rf, main="F1 Score", log="y")
+
+# Variables Importance
+varImp(rf)
+plot(varImp(rf))
+```
+
+## SVM
+```{r Cache=TRUE}
+# Train SVM Radial
+set.seed(1)
+
+svm1<- caret::train(Exited ~ ., 
+                 data = train,
+                 method = "svmRadial",
+                 metric = "F1",
+                 trControl = trainControl(method = "cv",
+                          number = 10,
+                          classProbs = TRUE,
+                          summaryFunction = f1,
+                          search = "grid"))
+svm1
+
+
+p4.1 <- predict(svm1, test)
+cm4.1 <- confusionMatrix(p4.1, test$Exited, positive = "Yes")
+cm4.1
+
+F1_4.1 <- F1_Score(y_pred = p4.1, y_true = test$Exited, positive = "Yes")
+F1_4.1
+
+# Variables Importance
+varImp(svm1)
+plot(varImp(svm1))
+```
+
+```{r Cache=TRUE}
+# Train SVM Linear
+set.seed(1)
+
+svm2<- caret::train(Exited ~ ., 
+                 data = train,
+                 method = "svmLinear2",
+                 metric = "F1",
+                 trControl = trainControl(method = "cv",
+                          number = 10,
+                          classProbs = TRUE,
+                          summaryFunction = f1,
+                          search = "grid"))
+svm2
+
+
+p4.2 <- predict(svm2, test)
+cm4.2 <- confusionMatrix(p4.2, test$Exited, positive = "Yes")
+cm4.2
+
+F1_4.2 <- F1_Score(y_pred = p4.2, y_true = test$Exited, positive = "Yes")
+F1_4.2
+
+# Variables Importance
+varImp(svm2)
+plot(varImp(svm2))
+```
+
+
+# Conclusions and Final Results
+```{r echo=FALSE}
+# Accuracy by model
+Accuracy <- c(cm1$overall["Accuracy"], cm2$overall["Accuracy"], cm3$overall["Accuracy"], cm4.1$overall["Accuracy"], cm4.2$overall["Accuracy"])
+Precision <- c(cm1$byClass["Pos Pred Value"], cm2$byClass["Pos Pred Value"], cm3$byClass["Pos Pred Value"], cm4.1$byClass["Pos Pred Value"], cm4.2$byClass["Pos Pred Value"])
+Recall <- c(cm1$byClass["Sensitivity"], cm2$byClass["Sensitivity"], cm3$byClass["Sensitivity"], cm4.1$byClass["Sensitivity"], cm4.2$byClass["Sensitivity"])
+F1_Score <- 2*(Precision*Recall)/(Precision + Recall)
+Model <- c("Logistic Regression", "KNN", "Random Forest", "SVM - Radial", "SVM - Linear")
+final_results <- data.frame(Model, Accuracy, Precision, Recall, F1_Score)
+knitr::kable(head(final_results), col.names = gsub("[.]", " ", names(final_results)), digits = 4)
+```
+
+We can conclude that the best model is **SVM - Radial Kernel** with the highest F1 Score and the 2nd highest accuracy. The most relevant variable when predicting customer churn in this dataset is the customer's age, while the least important one is whether or not the client has a credit card.
+
+Accuracy, no doubt, is an important metric to consider but it does not always give the full picture. Instead, when using model-based metrics to evaluate a imbalanced classification problem, it is often times recommended to look at the precision and recall score to fully evaluate the overall effectiveness of a model. F1-score metric finds an equal balance between these two, which is extremely useful in scenarios when we are working with imbalanced datasets.
+
+However, there is still room for performance improvement. I suggest trying other algorithms, such as ANN or XGBoost, and tuning parameters with other libraries and metrics that might lead to a better result. 
